@@ -1,0 +1,21 @@
+# deps / builds
+node_modules/
+dist/
+coverage/
+
+# env & secrets
+.env
+.env.*
+!.env.example
+
+# runtime data (local storage driver writes here)
+data/
+
+# logs & OS noise
+*.log
+.DS_Store
+Thumbs.db
+
+# the interview spec PDF stays out of the public repo
+Interview Task*
+*.pdf
