@@ -345,6 +345,13 @@ components:
       properties:
         id: { type: string }
         status: { type: string, enum: [pending, processing, completed, failed] }
+        stepStatuses:
+          type: object
+          description: Per-step statuses for live pipeline visualization in lists
+          properties:
+            caption: { type: string, enum: [pending, running, completed, failed] }
+            labels: { type: string, enum: [pending, running, completed, failed] }
+            safety: { type: string, enum: [pending, running, completed, failed] }
         flagged:
           type: boolean
           description: True iff SafeSearch returned LIKELY/VERY_LIKELY for any category
@@ -439,6 +446,7 @@ components:
         ok: { type: boolean }
         mongo: { type: boolean }
         redis: { type: boolean }
+        aiProvider: { type: string, enum: [mock, real] }
         uptimeSec: { type: integer }
 
     ErrorResponse:

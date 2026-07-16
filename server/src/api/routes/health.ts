@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import mongoose from 'mongoose';
+import { env } from '../../config/env';
 import { pingRedis } from '../../queue';
 
 const router: Router = Router();
@@ -14,6 +15,8 @@ router.get('/', async (_req, res) => {
     ok,
     mongo,
     redis,
+    // Lets the UI surface "mock mode" and its demo filenames to reviewers (D-005).
+    aiProvider: env.AI_PROVIDER,
     uptimeSec: Math.round(process.uptime()),
   });
 });

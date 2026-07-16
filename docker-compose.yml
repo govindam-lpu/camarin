@@ -1,0 +1,99 @@
+# Full local system: API + worker + queue (Redis) + database (Mongo).
+#
+#   docker compose up --build
+#   -> http://localhost:8080  (UI, API, and Swagger docs at /api/docs)
+#
+# Zero configuration required: runs in mock AI mode with local disk storage.
+# To use the real AI providers, create a .env next to this file with:
+#   AI_PROVIDER=real
+#   HF_TOKEN=hf_...
+#   GCV_API_KEY=AIza...
+# (see .env.example for everything else that can be tuned)
+
+name: media-pipeline
+
+services:
+  mongo:
+    image: mongo:7
+    restart: unless-stopped
+    volumes:
+      - mongo-data:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.runCommand({ ping: 1 }).ok"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    # AOF so queued-but-unprocessed jobs survive a redis restart.
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  api:
+    build:
+      context: .
+      dockerfile: server/Dockerfile
+    restart: unless-stopped
+    init: true
+    ports:
+      - "8080:8080"
+    environment: &app-env
+      NODE_ENV: production
+      PORT: 8080
+      MONGO_URI: mongodb://mongo:27017/mediapipeline
+      REDIS_URL: redis://redis:6379
+      # Local-compose secret. Real deployments MUST set their own (boot fails otherwise
+      # only when the value is left at the literal default 'change-me-in-production').
+      JWT_SECRET: ${JWT_SECRET:-local-compose-secret-do-not-use-in-real-prod}
+      STORAGE_DRIVER: ${STORAGE_DRIVER:-local}
+      LOCAL_STORAGE_DIR: /data/uploads
+      AI_PROVIDER: ${AI_PROVIDER:-mock}
+      HF_TOKEN: ${HF_TOKEN:-}
+      GCV_API_KEY: ${GCV_API_KEY:-}
+      WORKER_CONCURRENCY: ${WORKER_CONCURRENCY:-4}
+      JOB_ATTEMPTS: ${JOB_ATTEMPTS:-3}
+      JOB_BACKOFF_MS: ${JOB_BACKOFF_MS:-3000}
+      MOCK_DELAY_MS: ${MOCK_DELAY_MS:-900}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+    volumes:
+      # api (writes uploads, serves image bytes) and worker (reads) share this volume.
+      - uploads:/data/uploads
+    depends_on:
+      mongo:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  worker:
+    build:
+      context: .
+      dockerfile: server/Dockerfile
+    restart: unless-stopped
+    init: true
+    command: ["./node_modules/.bin/tsx", "src/worker/index.ts"]
+    # Same image + env as the API — one artifact, two entrypoints (D-010).
+    environment: *app-env
+    volumes:
+      - uploads:/data/uploads
+    depends_on:
+      mongo:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      disable: true
+    # Parallelism demo: docker compose up --scale worker=3
+
+volumes:
+  mongo-data:
+  redis-data:
+  uploads:

@@ -25,20 +25,46 @@ export function getQueue(): Queue<ProcessJobPayload> {
 }
 
 /**
+ * ioredis buffers commands while Redis is unreachable instead of failing them —
+ * unbounded, that turns "Redis is down" into hung HTTP requests. A timeout converts
+ * it into a clean failure the caller can handle (upload degrades to a retryable
+ * failed job, D-018; health reports redis: false).
+ */
+function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(`${label} timed out after ${ms}ms`)), ms);
+    promise.then(
+      (value) => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      (err) => {
+        clearTimeout(timer);
+        reject(err);
+      },
+    );
+  });
+}
+
+/**
  * Enqueue a processing job. Retry policy lives here, not in the worker:
  * transient failures re-attempt with exponential backoff (3s -> 6s -> 12s by default);
  * the worker escalates permanent errors via UnrecoverableError to skip remaining attempts. (D-009)
  */
 export async function enqueueProcessingJob(jobId: string): Promise<void> {
-  await getQueue().add(
-    'process-image',
-    { jobId },
-    {
-      attempts: env.JOB_ATTEMPTS,
-      backoff: { type: 'exponential', delay: env.JOB_BACKOFF_MS },
-      removeOnComplete: { count: 1000, age: 24 * 3600 },
-      removeOnFail: { count: 5000 },
-    },
+  await withTimeout(
+    getQueue().add(
+      'process-image',
+      { jobId },
+      {
+        attempts: env.JOB_ATTEMPTS,
+        backoff: { type: 'exponential', delay: env.JOB_BACKOFF_MS },
+        removeOnComplete: { count: 1000, age: 24 * 3600 },
+        removeOnFail: { count: 5000 },
+      },
+    ),
+    5000,
+    'queue enqueue',
   );
 }
 
@@ -49,11 +75,15 @@ export async function closeQueue(): Promise<void> {
   }
 }
 
-/** Health-check ping over the queue's existing Redis connection. */
+/** Health-check ping over the queue's existing Redis connection (bounded, never hangs). */
 export async function pingRedis(): Promise<boolean> {
   try {
-    const client = (await getQueue().client) as unknown as Redis;
-    return (await client.ping()) === 'PONG';
+    const client = (await withTimeout(
+      Promise.resolve(getQueue().client),
+      1500,
+      'redis client',
+    )) as unknown as Redis;
+    return (await withTimeout(client.ping(), 1500, 'redis ping')) === 'PONG';
   } catch {
     return false;
   }

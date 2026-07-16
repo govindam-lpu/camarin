@@ -34,6 +34,12 @@ export function serializeJobSummary(job: JobDoc) {
   return {
     id: job.id as string,
     status: job.status,
+    // Per-step statuses power the list's live pipeline strip without the full payload.
+    stepStatuses: {
+      caption: job.steps.caption.status,
+      labels: job.steps.labels.status,
+      safety: job.steps.safety.status,
+    },
     flagged: job.flagged,
     flaggedCategories: job.flaggedCategories,
     file: {

@@ -1,0 +1,11 @@
+**/node_modules
+**/dist
+**/.env
+**/data
+**/.test-uploads
+**/coverage
+.git
+*.pdf
+Interview Task*
+k8s
+.github
