@@ -16,6 +16,10 @@ data/
 .DS_Store
 Thumbs.db
 
+# local tooling
+.claude/
+.test-uploads/
+
 # the interview spec PDF stays out of the public repo
 Interview Task*
 *.pdf
