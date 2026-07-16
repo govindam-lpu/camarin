@@ -132,6 +132,13 @@ Legend: ✅ adopted · 🔁 revisit-when noted
 **Decision:** A dev entrypoint that boots the API against an in-memory MongoDB (no Docker, no Redis). Uploads intentionally degrade through the D-018/D-020 path, which is itself a state worth developing against.
 **Why:** UI iteration speed, and it doubles as a live demonstration that the API's failure modes are graceful. Not for reviewers (compose is), clearly labeled as such.
 
+## D-023 · Caption model: hosted VLM via HF router, not BLIP (forced by reality) ✅
+
+**Context:** The spec suggests `Salesforce/blip-image-captioning-base` on the Hugging Face Inference API. Verified empirically during key wiring: HF has retired task-specific serverless image-to-text entirely — the hub reports **zero** `image-to-text` models served by `hf-inference`, and calls return `"Model not supported by provider hf-inference"`. The spec anticipates exactly this ("the point is not which model you pick — more how you design the pipeline around it").
+**Decision:** Keep the Hugging Face Inference surface (same token, same free tier) but caption through the router's OpenAI-compatible `/v1/chat/completions` with a hosted vision-language model. Default: `google/gemma-3-4b-it` — probed as available on this account, small/fast, answers cleanly without reasoning preambles (Qwen-VL variants weren't enabled for the account; GLM-4.5V returned empty content under tight token budgets).
+**Why it validates the architecture:** the swap touched one provider file (~30 lines) and two env defaults; pipeline, worker, retries, tests, and UI were untouched. This is precisely the churn the provider seam (D-004) was designed to absorb. `HF_CAPTION_MODEL` / `HF_CAPTION_URL` stay env-swappable for the next time the provider landscape shifts.
+**Trade-offs:** a 4B instruct VLM captions differently than BLIP (usually better); free-tier router credits are finite (fine for review-scale traffic).
+
 ## D-022 · SafeSearch results render only for a completed safety step ✅
 
 **Context:** Mongoose materializes empty nested paths as `{}` (truthy) — the UI initially rendered an all-UNKNOWN safety matrix for jobs whose safety step never ran. Caught during browser QA.

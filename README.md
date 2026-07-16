@@ -137,7 +137,7 @@ Everything is validated at boot (zod) — invalid/missing config **fails fast wi
 | `S3_ENDPOINT/BUCKET/ACCESS_KEY_ID/SECRET_ACCESS_KEY` | — | required iff `STORAGE_DRIVER=s3` |
 | `AI_PROVIDER` | `mock` | `real` requires the two keys below |
 | `HF_TOKEN` | — | Hugging Face read token |
-| `HF_CAPTION_URL` | BLIP base via HF router | swap models/providers without code changes |
+| `HF_CAPTION_URL` / `HF_CAPTION_MODEL` | HF router chat API / `google/gemma-3-4b-it` | swap caption models without code changes (see D-023 for why not BLIP) |
 | `GCV_API_KEY` | — | Google Cloud Vision API key |
 | `WORKER_CONCURRENCY` | `4` | parallel jobs per worker process |
 | `JOB_ATTEMPTS` / `JOB_BACKOFF_MS` | `3` / `3000` | retry budget & exponential backoff base |

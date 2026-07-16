@@ -44,9 +44,8 @@ const envSchema = z
 
     AI_PROVIDER: z.enum(['mock', 'real']).default('mock'),
     HF_TOKEN: optionalString,
-    HF_CAPTION_URL: z
-      .string()
-      .default('https://router.huggingface.co/hf-inference/models/Salesforce/blip-image-captioning-base'),
+    HF_CAPTION_URL: z.string().default('https://router.huggingface.co/v1/chat/completions'),
+    HF_CAPTION_MODEL: z.string().default('google/gemma-3-4b-it'),
     GCV_API_KEY: optionalString,
     GCV_ENDPOINT: z.string().default('https://vision.googleapis.com/v1/images:annotate'),
     AI_TIMEOUT_MS: z.coerce.number().int().positive().default(45_000),

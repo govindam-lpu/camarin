@@ -2,17 +2,26 @@ import { AiProviderError } from './errors';
 import type { CaptionResult, ImageInput } from './types';
 
 export interface HfConfig {
+  /** OpenAI-compatible chat completions endpoint on the HF router. */
   url: string;
+  /** A hosted vision-language model id (see DECISIONS.md D-023). */
+  model: string;
   token: string;
   timeoutMs: number;
 }
 
+const CAPTION_PROMPT =
+  'Describe this image in one concise sentence, like an image caption. Respond with the caption only — no preamble, no quotes.';
+
 /**
- * Image captioning via the Hugging Face Inference API (BLIP by default; the exact
- * model/endpoint is configurable via HF_CAPTION_URL since serverless availability shifts).
+ * Image captioning via Hugging Face Inference (router).
  *
- * The famous failure mode: a cold model returns 503 + `estimated_time` while it loads.
- * That is classified retryable — BullMQ's exponential backoff (D-009) rides it out.
+ * History (D-023): the spec suggested Salesforce/blip-image-captioning-base on the
+ * classic serverless API — HF has since retired task-specific image-to-text serving
+ * entirely (verified empirically: zero image-to-text models on hf-inference). The
+ * current HF surface for captioning is a vision LLM through the router's
+ * chat-completions API: same token, same free tier, provider-agnostic model routing.
+ * This swap cost ~30 lines behind the provider seam (D-004) — which is why it exists.
  */
 export async function hfCaption(input: ImageInput, cfg: HfConfig): Promise<CaptionResult> {
   let res: Response;
@@ -21,9 +30,25 @@ export async function hfCaption(input: ImageInput, cfg: HfConfig): Promise<Capti
       method: 'POST',
       headers: {
         Authorization: `Bearer ${cfg.token}`,
-        'Content-Type': input.mime,
+        'Content-Type': 'application/json',
       },
-      body: new Uint8Array(input.data),
+      body: JSON.stringify({
+        model: cfg.model,
+        messages: [
+          {
+            role: 'user',
+            content: [
+              {
+                type: 'image_url',
+                image_url: { url: `data:${input.mime};base64,${input.data.toString('base64')}` },
+              },
+              { type: 'text', text: CAPTION_PROMPT },
+            ],
+          },
+        ],
+        max_tokens: 60,
+        temperature: 0.2,
+      }),
       signal: AbortSignal.timeout(cfg.timeoutMs),
     });
   } catch (err) {
@@ -39,7 +64,7 @@ export async function hfCaption(input: ImageInput, cfg: HfConfig): Promise<Capti
     const snippet = body.slice(0, 300);
 
     if (res.status === 503) {
-      throw new AiProviderError(`Hugging Face model is cold-starting (503): ${snippet}`, {
+      throw new AiProviderError(`Hugging Face model unavailable/cold (503): ${snippet}`, {
         retryable: true,
         code: 'HF_MODEL_LOADING',
         provider: 'huggingface',
@@ -47,7 +72,7 @@ export async function hfCaption(input: ImageInput, cfg: HfConfig): Promise<Capti
       });
     }
     if (res.status === 429) {
-      throw new AiProviderError('Hugging Face rate limit hit (429)', {
+      throw new AiProviderError('Hugging Face rate limit / credits exhausted (429)', {
         retryable: true,
         code: 'HF_RATE_LIMITED',
         provider: 'huggingface',
@@ -70,9 +95,9 @@ export async function hfCaption(input: ImageInput, cfg: HfConfig): Promise<Capti
         status: res.status,
       });
     }
-    if (res.status === 404 || res.status === 410) {
+    if (res.status === 404 || /model/i.test(snippet)) {
       throw new AiProviderError(
-        'Caption model not available on the inference endpoint — set HF_CAPTION_URL to a hosted model',
+        `Caption model "${cfg.model}" not served right now — set HF_CAPTION_MODEL to a hosted vision model (${snippet})`,
         { retryable: false, code: 'HF_MODEL_UNAVAILABLE', provider: 'huggingface', status: res.status },
       );
     }
@@ -84,21 +109,24 @@ export async function hfCaption(input: ImageInput, cfg: HfConfig): Promise<Capti
     });
   }
 
-  const json: unknown = await res.json().catch(() => null);
-  // BLIP-style image-to-text responds `[{ "generated_text": "..." }]`; be lenient about shape.
+  const json = (await res.json().catch(() => null)) as {
+    choices?: Array<{ message?: { content?: unknown } }>;
+  } | null;
+  const raw = json?.choices?.[0]?.message?.content;
   const text =
-    Array.isArray(json) && typeof (json[0] as { generated_text?: unknown })?.generated_text === 'string'
-      ? ((json[0] as { generated_text: string }).generated_text)
-      : typeof (json as { generated_text?: unknown })?.generated_text === 'string'
-        ? (json as { generated_text: string }).generated_text
-        : null;
+    typeof raw === 'string'
+      ? raw
+          .trim()
+          .replace(/^["'“]+|["'”]+$/g, '') // models love wrapping captions in quotes
+          .replace(/\s+/g, ' ')
+      : null;
 
-  if (!text?.trim()) {
+  if (!text) {
     throw new AiProviderError(
       `Unexpected Hugging Face response shape: ${JSON.stringify(json)?.slice(0, 300)}`,
       { retryable: false, code: 'HF_UNEXPECTED_RESPONSE', provider: 'huggingface' },
     );
   }
 
-  return { text: text.trim() };
+  return { text };
 }

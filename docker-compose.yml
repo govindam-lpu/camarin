@@ -58,6 +58,8 @@ services:
       LOCAL_STORAGE_DIR: /data/uploads
       AI_PROVIDER: ${AI_PROVIDER:-mock}
       HF_TOKEN: ${HF_TOKEN:-}
+      HF_CAPTION_URL: ${HF_CAPTION_URL:-https://router.huggingface.co/v1/chat/completions}
+      HF_CAPTION_MODEL: ${HF_CAPTION_MODEL:-google/gemma-3-4b-it}
       GCV_API_KEY: ${GCV_API_KEY:-}
       WORKER_CONCURRENCY: ${WORKER_CONCURRENCY:-4}
       JOB_ATTEMPTS: ${JOB_ATTEMPTS:-3}

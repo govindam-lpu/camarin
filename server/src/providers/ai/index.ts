@@ -8,6 +8,7 @@ function createRealProvider(): AiProvider {
   // Config presence is validated at boot by the env schema (fail fast).
   const hf: HfConfig = {
     url: env.HF_CAPTION_URL,
+    model: env.HF_CAPTION_MODEL,
     token: env.HF_TOKEN!,
     timeoutMs: env.AI_TIMEOUT_MS,
   };
