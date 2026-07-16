@@ -1,0 +1,454 @@
+openapi: 3.0.3
+info:
+  title: AI Media Processing API
+  version: 1.0.0
+  description: |
+    Upload images, process them asynchronously through a 3-step AI pipeline
+    (caption → labels → safety check), and query the enriched results.
+
+    **Auth:** all endpoints except `/auth/signup`, `/auth/login`, and `/health`
+    require `Authorization: Bearer <token>` (obtained from signup/login).
+
+    **Async contract:** `POST /jobs` returns a job ID immediately; poll
+    `GET /jobs/{id}` (or the list) for status transitions
+    `pending → processing → completed | failed`.
+servers:
+  - url: /api
+tags:
+  - name: auth
+  - name: jobs
+  - name: notifications
+  - name: system
+
+paths:
+  /auth/signup:
+    post:
+      tags: [auth]
+      summary: Create an account
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/Credentials' }
+      responses:
+        '201':
+          description: Account created
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AuthResponse' }
+        '400': { $ref: '#/components/responses/ValidationError' }
+        '409':
+          description: Email already registered (code EMAIL_TAKEN)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+
+  /auth/login:
+    post:
+      tags: [auth]
+      summary: Log in
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/Credentials' }
+      responses:
+        '200':
+          description: Logged in
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AuthResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /auth/me:
+    get:
+      tags: [auth]
+      summary: Current user (session restore)
+      responses:
+        '200':
+          description: The authenticated user
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  user: { $ref: '#/components/schemas/User' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /jobs:
+    post:
+      tags: [jobs]
+      summary: Upload an image and enqueue processing
+      description: |
+        Accepts JPG/PNG/WEBP up to 5MB (enforced at the API layer: size limit,
+        MIME whitelist, **and** magic-byte content sniffing). Returns the job
+        immediately with status `pending` — processing never blocks the request.
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file]
+              properties:
+                file:
+                  type: string
+                  format: binary
+                  description: The image (form field name must be `file`)
+      responses:
+        '201':
+          description: Job created and queued
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  job: { $ref: '#/components/schemas/JobSummary' }
+        '400':
+          description: >
+            NO_FILE / UNSUPPORTED_MEDIA_TYPE / INVALID_IMAGE_CONTENT — the file is
+            missing, not an allowed type, or its bytes are not a real image.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '413':
+          description: File exceeds the 5MB limit (code FILE_TOO_LARGE)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+    get:
+      tags: [jobs]
+      summary: List my jobs (newest first)
+      parameters:
+        - in: query
+          name: status
+          schema: { type: string, enum: [pending, processing, completed, failed] }
+        - in: query
+          name: flagged
+          schema: { type: string, enum: ['true', 'false'] }
+        - in: query
+          name: page
+          schema: { type: integer, minimum: 1, default: 1 }
+        - in: query
+          name: limit
+          schema: { type: integer, minimum: 1, maximum: 50, default: 20 }
+      responses:
+        '200':
+          description: Paginated job list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  jobs:
+                    type: array
+                    items: { $ref: '#/components/schemas/JobSummary' }
+                  page: { type: integer }
+                  limit: { type: integer }
+                  total: { type: integer }
+                  totalPages: { type: integer }
+                  activeCount:
+                    type: integer
+                    description: >
+                      Count of the user's pending/processing jobs across ALL pages —
+                      the client keeps polling while this is > 0.
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /jobs/{id}:
+    get:
+      tags: [jobs]
+      summary: Full job results (caption, labels, safety, per-step telemetry)
+      parameters: [{ $ref: '#/components/parameters/JobId' }]
+      responses:
+        '200':
+          description: The job with full step detail
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  job: { $ref: '#/components/schemas/JobDetail' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /jobs/{id}/retry:
+    post:
+      tags: [jobs]
+      summary: Retry a failed job
+      description: |
+        Only jobs with status `failed` can be retried. Steps that already completed
+        keep their results (checkpoint resume); failed steps re-run with a fresh
+        attempt budget.
+      parameters: [{ $ref: '#/components/parameters/JobId' }]
+      responses:
+        '200':
+          description: Job re-queued
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  job: { $ref: '#/components/schemas/JobSummary' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: Job is not in a retryable state (code JOB_NOT_RETRYABLE)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+
+  /jobs/{id}/image:
+    get:
+      tags: [jobs]
+      summary: Download the uploaded image (owner only)
+      parameters: [{ $ref: '#/components/parameters/JobId' }]
+      responses:
+        '200':
+          description: The image bytes
+          content:
+            image/jpeg: { schema: { type: string, format: binary } }
+            image/png: { schema: { type: string, format: binary } }
+            image/webp: { schema: { type: string, format: binary } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /notifications:
+    get:
+      tags: [notifications]
+      summary: Latest notifications + unread count
+      responses:
+        '200':
+          description: Latest 50 notifications
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  notifications:
+                    type: array
+                    items: { $ref: '#/components/schemas/Notification' }
+                  unreadCount: { type: integer }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /notifications/read:
+    post:
+      tags: [notifications]
+      summary: Mark notifications as read
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                ids:
+                  type: array
+                  items: { type: string }
+                all:
+                  type: boolean
+              description: Provide either `ids` or `all: true`
+      responses:
+        '200':
+          description: Marked
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean }
+        '400': { $ref: '#/components/responses/ValidationError' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /health:
+    get:
+      tags: [system]
+      summary: Liveness + dependency readiness
+      security: []
+      responses:
+        '200':
+          description: All dependencies reachable
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Health' }
+        '503':
+          description: Mongo or Redis unreachable
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Health' }
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  parameters:
+    JobId:
+      in: path
+      name: id
+      required: true
+      schema: { type: string }
+      description: Job ID (Mongo ObjectId)
+
+  responses:
+    Unauthorized:
+      description: Missing/invalid token (code UNAUTHORIZED)
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorResponse' }
+    NotFound:
+      description: Resource not found or not owned by the caller (code NOT_FOUND)
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorResponse' }
+    ValidationError:
+      description: Request failed validation (code VALIDATION_ERROR)
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorResponse' }
+
+  schemas:
+    Credentials:
+      type: object
+      required: [email, password]
+      properties:
+        email: { type: string, format: email }
+        password: { type: string, minLength: 8, maxLength: 128 }
+
+    User:
+      type: object
+      properties:
+        id: { type: string }
+        email: { type: string }
+        createdAt: { type: string, format: date-time }
+
+    AuthResponse:
+      type: object
+      properties:
+        token: { type: string, description: JWT — send as `Authorization Bearer <token>` }
+        user: { $ref: '#/components/schemas/User' }
+
+    JobError:
+      type: object
+      nullable: true
+      properties:
+        code: { type: string, nullable: true }
+        message: { type: string }
+        retryable: { type: boolean, nullable: true }
+
+    JobSummary:
+      type: object
+      properties:
+        id: { type: string }
+        status: { type: string, enum: [pending, processing, completed, failed] }
+        flagged:
+          type: boolean
+          description: True iff SafeSearch returned LIKELY/VERY_LIKELY for any category
+        flaggedCategories:
+          type: array
+          items: { type: string, enum: [adult, spoof, medical, violence, racy] }
+        file:
+          type: object
+          properties:
+            originalName: { type: string }
+            mime: { type: string }
+            size: { type: integer }
+        caption: { type: string, nullable: true }
+        error: { $ref: '#/components/schemas/JobError' }
+        attemptsMade: { type: integer }
+        manualRetries: { type: integer }
+        createdAt: { type: string, format: date-time }
+        completedAt: { type: string, format: date-time, nullable: true }
+
+    StepBase:
+      type: object
+      properties:
+        status: { type: string, enum: [pending, running, completed, failed] }
+        attempts: { type: integer }
+        startedAt: { type: string, format: date-time, nullable: true }
+        completedAt: { type: string, format: date-time, nullable: true }
+        durationMs: { type: integer, nullable: true }
+        error: { type: string, nullable: true }
+
+    JobDetail:
+      allOf:
+        - $ref: '#/components/schemas/JobSummary'
+        - type: object
+          properties:
+            queuedAt: { type: string, format: date-time, nullable: true }
+            startedAt: { type: string, format: date-time, nullable: true }
+            steps:
+              type: object
+              properties:
+                caption:
+                  allOf:
+                    - $ref: '#/components/schemas/StepBase'
+                    - type: object
+                      properties:
+                        text: { type: string, nullable: true }
+                labels:
+                  allOf:
+                    - $ref: '#/components/schemas/StepBase'
+                    - type: object
+                      properties:
+                        items:
+                          type: array
+                          nullable: true
+                          items:
+                            type: object
+                            properties:
+                              name: { type: string }
+                              score: { type: number }
+                safety:
+                  allOf:
+                    - $ref: '#/components/schemas/StepBase'
+                    - type: object
+                      properties:
+                        safe: { type: boolean, nullable: true }
+                        likelihoods:
+                          type: object
+                          nullable: true
+                          properties:
+                            adult: { $ref: '#/components/schemas/Likelihood' }
+                            spoof: { $ref: '#/components/schemas/Likelihood' }
+                            medical: { $ref: '#/components/schemas/Likelihood' }
+                            violence: { $ref: '#/components/schemas/Likelihood' }
+                            racy: { $ref: '#/components/schemas/Likelihood' }
+
+    Likelihood:
+      type: string
+      enum: [UNKNOWN, VERY_UNLIKELY, UNLIKELY, POSSIBLE, LIKELY, VERY_LIKELY]
+
+    Notification:
+      type: object
+      properties:
+        id: { type: string }
+        jobId: { type: string }
+        type: { type: string, enum: [job_flagged, job_failed] }
+        message: { type: string }
+        read: { type: boolean }
+        createdAt: { type: string, format: date-time }
+
+    Health:
+      type: object
+      properties:
+        ok: { type: boolean }
+        mongo: { type: boolean }
+        redis: { type: boolean }
+        uptimeSec: { type: integer }
+
+    ErrorResponse:
+      type: object
+      properties:
+        error:
+          type: object
+          properties:
+            code: { type: string }
+            message: { type: string }
+
+security:
+  - bearerAuth: []
