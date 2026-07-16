@@ -1,0 +1,38 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: worker
+  namespace: media-pipeline
+spec:
+  replicas: 2 # throughput dimension: replicas × WORKER_CONCURRENCY parallel jobs
+  selector:
+    matchLabels: { app: worker }
+  template:
+    metadata:
+      labels: { app: worker }
+    spec:
+      # Graceful drain: worker.close() finishes in-flight jobs on SIGTERM.
+      terminationGracePeriodSeconds: 60
+      containers:
+        - name: worker
+          image: ghcr.io/OWNER/media-pipeline:latest # same image as the api (D-010)
+          command: ["./node_modules/.bin/tsx", "src/worker/index.ts"]
+          envFrom:
+            - configMapRef: { name: app-config }
+            - secretRef: { name: app-secrets }
+          resources:
+            requests: { cpu: 100m, memory: 192Mi }
+            limits: { memory: 384Mi }
+# Autoscaling note: CPU is the wrong signal for a queue consumer — the right trigger is
+# queue depth. With KEDA installed:
+#
+#   apiVersion: keda.sh/v1alpha1
+#   kind: ScaledObject
+#   spec:
+#     scaleTargetRef: { name: worker }
+#     triggers:
+#       - type: redis
+#         metadata:
+#           address: <redis host:port>
+#           listName: bull:media-jobs:wait
+#           listLength: "10"        # target jobs-per-replica

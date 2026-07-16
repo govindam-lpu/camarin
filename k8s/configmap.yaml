@@ -1,0 +1,18 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: app-config
+  namespace: media-pipeline
+data:
+  NODE_ENV: "production"
+  PORT: "8080"
+  STORAGE_DRIVER: "s3" # pods share no disk — object storage is mandatory (D-003)
+  S3_ENDPOINT: "https://storage.googleapis.com"
+  S3_REGION: "auto"
+  S3_BUCKET: "media-pipeline-uploads"
+  S3_FORCE_PATH_STYLE: "false"
+  AI_PROVIDER: "real"
+  WORKER_CONCURRENCY: "4"
+  JOB_ATTEMPTS: "3"
+  JOB_BACKOFF_MS: "3000"
+  LOG_LEVEL: "info"

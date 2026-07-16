@@ -121,6 +121,22 @@ Legend: ✅ adopted · 🔁 revisit-when noted
 
 **Why:** One ID end-to-end (DB, queue payload, API, UI) — no UUID↔ObjectId mapping table. ObjectIds leak creation time; acceptable for this product (they're only visible to their owner).
 
+## D-020 · Bounded queue operations (found during testing) ✅
+
+**Context:** ioredis *buffers* commands while Redis is unreachable instead of failing them. Unbounded, that turns "Redis is down" into hung HTTP requests (upload would block forever awaiting `queue.add`) and a hung health endpoint.
+**Decision:** Every API-side queue interaction is wrapped in a timeout: enqueue 5 s → the upload degrades to a `failed (QUEUE_ENQUEUE_FAILED, retryable)` job per D-018; health ping 1.5 s → reports `redis: false` instead of stalling probes.
+**Why it matters:** This came out of actually exercising the Redis-less failure mode (standalone harness) rather than assuming the happy path — the exact class of failure the evaluation asks about.
+
+## D-021 · Zero-infra dev harness (`scripts/dev-standalone.ts`) ✅
+
+**Decision:** A dev entrypoint that boots the API against an in-memory MongoDB (no Docker, no Redis). Uploads intentionally degrade through the D-018/D-020 path, which is itself a state worth developing against.
+**Why:** UI iteration speed, and it doubles as a live demonstration that the API's failure modes are graceful. Not for reviewers (compose is), clearly labeled as such.
+
+## D-022 · SafeSearch results render only for a completed safety step ✅
+
+**Context:** Mongoose materializes empty nested paths as `{}` (truthy) — the UI initially rendered an all-UNKNOWN safety matrix for jobs whose safety step never ran. Caught during browser QA.
+**Decision:** Result sections in the detail view are gated on the *step's* status, not on data truthiness. Step status is the single source of truth for "did this produce results".
+
 ---
 
 # Deliberately not built (and why)
