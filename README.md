@@ -4,7 +4,7 @@ Upload images → they're stored durably, queued, and processed **asynchronously
 
 - **Live demo:** _deployment URL goes here (Phase 8)_
 - **API docs:** `/api/docs` (Swagger UI) · [openapi.yaml](server/openapi.yaml)
-- **Decision log:** [DECISIONS.md](DECISIONS.md) — every non-obvious choice, its alternatives, and what was deliberately cut ⭐
+- **Decision log:** a full record of every non-obvious choice, its alternatives, and what was deliberately cut — provided as a separate document with the submission ⭐
 
 ---
 
@@ -69,7 +69,7 @@ stateDiagram-v2
     completed --> [*]
 ```
 
-### Why it's shaped this way (short version — full reasoning in [DECISIONS.md](DECISIONS.md))
+### Why it's shaped this way (short version — full reasoning in the decision log, submitted separately)
 
 | Concern | Choice | The one-line why |
 |---|---|---|
@@ -186,7 +186,6 @@ Real Mongo semantics via `mongodb-memory-server`; queue and AI providers are inj
 
 ```
 ├─ docker-compose.yml     # api + worker + redis + mongo, zero-config
-├─ DECISIONS.md           # ⭐ the decision log
 ├─ server/                # one package, two entrypoints (D-010)
 │  ├─ openapi.yaml        # served at /api/docs
 │  ├─ Dockerfile          # multi-stage; SPA baked into the API image
@@ -218,7 +217,7 @@ Real Mongo semantics via `mongodb-memory-server`; queue and AI providers are inj
 
 ## Known limitations & what I'd do with more time
 
-Deliberate cuts, each with full reasoning in [DECISIONS.md](DECISIONS.md#deliberately-not-built-and-why):
+Deliberate cuts, each with full reasoning in the decision log (submitted separately):
 
 - **No email notifications** — in-app only; the notification write is behind one seam, Resend would slot in.
 - **No WebSockets/SSE** — polling is the right cost/benefit at 5–15s job durations.

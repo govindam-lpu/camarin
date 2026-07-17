@@ -20,6 +20,9 @@ Thumbs.db
 .claude/
 .test-uploads/
 
+# decision log — maintained locally, submitted separately (kept off the public repo)
+DECISIONS.md
+
 # the interview spec PDF stays out of the public repo
 Interview Task*
 *.pdf
