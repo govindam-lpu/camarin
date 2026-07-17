@@ -1,5 +1,7 @@
 # Darkroom — AI-Powered Media Processing Microservice
 
+[![CI](https://github.com/govindam-lpu/camarin/actions/workflows/ci.yml/badge.svg)](https://github.com/govindam-lpu/camarin/actions/workflows/ci.yml)
+
 Upload images → they're stored durably, queued, and processed **asynchronously** by a worker running a three-step AI pipeline (**caption → labels → safety check**) → enriched results stream into a live-updating UI. Users never wait on AI: uploads return a job ID immediately.
 
 - **Live demo:** _add your deployed URL here after running [deploy/README.md](deploy/README.md)_
@@ -40,15 +42,37 @@ Parallelism: select **multiple files at once** — they process concurrently (`W
 
 ---
 
+## Requirements coverage
+
+Every requirement in the brief, and where it lives:
+
+| Requirement | Where / how |
+|---|---|
+| Sign up & log in; **all** endpoints authenticated; auth choice documented | JWT Bearer + bcrypt(12); `requireAuth` on every route (unauth → 401); rationale in the decision log |
+| Uploads restricted to JPG/PNG/WEBP, clear error otherwise | MIME whitelist **and** magic-byte content sniff → 400 (a renamed `.txt` is caught) |
+| Max 5 MB, enforced **at the API layer** | multer limit → 413 `FILE_TOO_LARGE` (not just a frontend check) |
+| Assign job ID, store file, create `pending` job, enqueue, return immediately | `POST /api/jobs` → **201 + job ID instantly**; processing never blocks the response |
+| UI: signup/login · upload · job list with statuses · detail with full results · **retry failed** | React SPA — all five, verified end-to-end |
+| Status updates via polling or WebSockets (documented) | Polling that **stops when idle**, choice documented (D-006) |
+| Flag when SafeSearch returns LIKELY/VERY_LIKELY; store the category | `computeFlaggedCategories` — POSSIBLE deliberately does **not** flag (D-012) |
+| Flagged jobs surfaced distinctly + user notified | Distinct row styling + "Flagged" filter + in-app notification center (D-007) |
+| MERN · queue · Docker (mandatory) · Kubernetes (bonus) | Mongo/Express/React/Node · BullMQ+Redis · Dockerfile + compose · [k8s/](k8s/) manifests |
+| `docker compose up` brings up API + worker + queue + database | Verified — 4 services, zero config → working system |
+| Deliverables: repo · deployed URL · API collection · README | This repo · [deploy guide](deploy/README.md) · OpenAPI at `/api/docs` · this file |
+| Tests on worker pipeline logic + retry behavior (minimum) | 53 tests; [pipeline.test.ts](server/tests/pipeline.test.ts) + [retry.test.ts](server/tests/retry.test.ts) |
+| Bonus: scalability under 10× articulated | [Scalability](#scalability-how-this-behaves-at-10-and-what-breaks-first) section |
+
+---
+
 ## Architecture
 
 ```mermaid
 flowchart LR
     B[Browser<br/>React SPA] -->|JWT Bearer<br/>same origin| A[API<br/>Express / TS]
-    A -->|1\. validate: size, MIME,<br/>magic bytes| A
-    A -->|2\. put file| S[(Storage<br/>local disk / S3-compatible)]
-    A -->|3\. create job: pending| M[(MongoDB<br/>users, jobs, notifications)]
-    A -->|4\. enqueue jobId| R[(Redis<br/>BullMQ queue)]
+    A -->|1. validate: size, MIME,<br/>magic bytes| A
+    A -->|2. put file| S[(Storage<br/>local disk / S3-compatible)]
+    A -->|3. create job: pending| M[(MongoDB<br/>users, jobs, notifications)]
+    A -->|4. enqueue jobId| R[(Redis<br/>BullMQ queue)]
     W[Worker<br/>same image,<br/>2nd entrypoint] -->|consume, concurrency N| R
     W -->|get file| S
     W -->|caption| HF[Hugging Face Inference<br/>hosted VLM]
