@@ -1,3 +1,4 @@
+import { useQueryClient } from '@tanstack/react-query';
 import {
   createContext,
   useCallback,
@@ -24,11 +25,14 @@ const AuthContext = createContext<AuthContextValue | null>(null);
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [ready, setReady] = useState(false);
+  const queryClient = useQueryClient();
 
   const logout = useCallback(() => {
     clearToken();
+    // Cached queries belong to the old session — never show them to the next account.
+    queryClient.clear();
     setUser(null);
-  }, []);
+  }, [queryClient]);
 
   // Any API 401 (expired/invalid token) drops the session.
   useEffect(() => {
@@ -48,17 +52,25 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       .finally(() => setReady(true));
   }, []);
 
-  const login = useCallback(async (email: string, password: string) => {
-    const { token, user } = await api.login(email, password);
-    setToken(token);
-    setUser(user);
-  }, []);
+  const login = useCallback(
+    async (email: string, password: string) => {
+      const { token, user } = await api.login(email, password);
+      setToken(token);
+      queryClient.clear();
+      setUser(user);
+    },
+    [queryClient],
+  );
 
-  const signup = useCallback(async (email: string, password: string) => {
-    const { token, user } = await api.signup(email, password);
-    setToken(token);
-    setUser(user);
-  }, []);
+  const signup = useCallback(
+    async (email: string, password: string) => {
+      const { token, user } = await api.signup(email, password);
+      setToken(token);
+      queryClient.clear();
+      setUser(user);
+    },
+    [queryClient],
+  );
 
   const value = useMemo(
     () => ({ user, ready, login, signup, logout }),

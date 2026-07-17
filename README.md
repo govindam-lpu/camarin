@@ -50,7 +50,7 @@ flowchart LR
     A -->|4\. enqueue jobId| R[(Redis<br/>BullMQ queue)]
     W[Worker<br/>same image,<br/>2nd entrypoint] -->|consume, concurrency N| R
     W -->|get file| S
-    W -->|caption| HF[Hugging Face<br/>BLIP]
+    W -->|caption| HF[Hugging Face Inference<br/>hosted VLM]
     W -->|labels + SafeSearch| GV[Google Cloud Vision]
     W -->|checkpoint each step,<br/>flagged calc, notify| M
     B -.->|poll 1.5–2.5s<br/>while active| A
@@ -160,8 +160,8 @@ docker compose up --build
 cd server && npm i && npm run dev:api     # + npm run dev:worker in another shell
 cd web && npm i && npm run dev            # Vite on :5173, proxies /api → :8080
 
-# Zero-infra UI development (in-memory Mongo, no Redis — uploads degrade to
-# retryable-failed jobs by design):
+# Zero-infra full-product mode (in-memory Mongo + in-process queue driver + mock AI —
+# the entire pipeline runs with no Docker/Redis; pair with the Vite dev server):
 cd server && npx tsx scripts/dev-standalone.ts
 ```
 

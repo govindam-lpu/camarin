@@ -3,10 +3,13 @@ import { z } from 'zod';
 
 // Native .env loading (Node >= 20.6) — no dotenv dependency needed.
 // Checks server/.env first, then the repo root .env (compose passes real env vars instead).
-for (const candidate of ['.env', '../.env']) {
-  if (existsSync(candidate)) {
-    process.loadEnvFile(candidate);
-    break;
+// Never under tests: suites must be hermetic, not shaped by whatever .env is on the machine.
+if (process.env.NODE_ENV !== 'test' && !process.env.VITEST) {
+  for (const candidate of ['.env', '../.env']) {
+    if (existsSync(candidate)) {
+      process.loadEnvFile(candidate);
+      break;
+    }
   }
 }
 
@@ -50,6 +53,8 @@ const envSchema = z
     GCV_ENDPOINT: z.string().default('https://vision.googleapis.com/v1/images:annotate'),
     AI_TIMEOUT_MS: z.coerce.number().int().positive().default(45_000),
 
+    /** bullmq (Redis) everywhere real; inline runs the pipeline in-process (dev harness only, D-021). */
+    QUEUE_DRIVER: z.enum(['bullmq', 'inline']).default('bullmq'),
     WORKER_CONCURRENCY: z.coerce.number().int().positive().default(4),
     JOB_ATTEMPTS: z.coerce.number().int().positive().default(3),
     JOB_BACKOFF_MS: z.coerce.number().int().positive().default(3000),

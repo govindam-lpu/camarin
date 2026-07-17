@@ -46,6 +46,7 @@ Legend: ✅ adopted · 🔁 revisit-when noted
 **Options:** short polling · SSE · WebSockets (socket.io)
 **Decision:** Polling via TanStack Query — job list refetches every 2.5 s *only while any job is non-terminal*, job detail every 1.5 s while active, notifications every 10 s. Polling stops entirely when everything is settled.
 **Why:** Jobs complete in ~5–15 s; sub-second latency buys nothing. Polling is stateless — it works through any proxy/CDN, needs no sticky sessions or Redis pub/sub fan-out when the API scales horizontally, and it degrades gracefully. WebSockets would be the *third* stateful concern (after Mongo/Redis) for a strictly cosmetic gain at this scale.
+**Observed nuance (kept deliberately):** TanStack pauses interval refetching while the tab is hidden and refetches immediately on focus (`refetchOnWindowFocus`) — so background tabs cost zero requests and are never stale for more than a moment when the user returns.
 **Trade-offs:** ~0.4 req/s per active user; at 10× load this is the first thing I'd swap. 🔁 Upgrade path (documented in README): SSE or socket.io backed by Redis pub/sub, emitting on job state transitions from the worker.
 
 ## D-007 · Flagged-content notification: in-app, not email ✅
@@ -127,10 +128,16 @@ Legend: ✅ adopted · 🔁 revisit-when noted
 **Decision:** Every API-side queue interaction is wrapped in a timeout: enqueue 5 s → the upload degrades to a `failed (QUEUE_ENQUEUE_FAILED, retryable)` job per D-018; health ping 1.5 s → reports `redis: false` instead of stalling probes.
 **Why it matters:** This came out of actually exercising the Redis-less failure mode (standalone harness) rather than assuming the happy path — the exact class of failure the evaluation asks about.
 
-## D-021 · Zero-infra dev harness (`scripts/dev-standalone.ts`) ✅
+## D-021 · Zero-infra dev harness: in-memory Mongo + inline queue driver ✅
 
-**Decision:** A dev entrypoint that boots the API against an in-memory MongoDB (no Docker, no Redis). Uploads intentionally degrade through the D-018/D-020 path, which is itself a state worth developing against.
-**Why:** UI iteration speed, and it doubles as a live demonstration that the API's failure modes are graceful. Not for reviewers (compose is), clearly labeled as such.
+**Decision:** `scripts/dev-standalone.ts` boots the real API with an in-memory MongoDB and `QUEUE_DRIVER=inline` — a ~25-line queue-module driver that runs the actual worker pipeline in-process (same processor, same error classification and finality; only the transport is skipped: cross-process delivery, persistence, backoff pacing). With the mock AI provider that makes the *entire* product — upload → pipeline → completed/flagged/failed → notifications → manual retry — runnable with zero infrastructure.
+**Why:** UI iteration speed, and honest self-QA: the full flow can be exercised in a browser before Docker/deploy exist. The driver is a transport swap behind the same `enqueueProcessingJob` seam, not a second queue implementation.
+**Boundary:** dev-only by default and convention — compose, k8s, and every deploy target run `bullmq`. Setting `QUEUE_DRIVER=inline` in a real deployment would silently serialize processing into API processes; the env default and docs guard against that.
+
+## D-022 · SafeSearch results render only for a completed safety step ✅
+
+**Context:** Mongoose materializes empty nested paths as `{}` (truthy) — the UI initially rendered an all-UNKNOWN safety matrix for jobs whose safety step never ran. Caught during browser QA.
+**Decision:** Result sections in the detail view are gated on the *step's* status, not on data truthiness. Step status is the single source of truth for "did this produce results".
 
 ## D-023 · Caption model: hosted VLM via HF router, not BLIP (forced by reality) ✅
 
@@ -138,11 +145,6 @@ Legend: ✅ adopted · 🔁 revisit-when noted
 **Decision:** Keep the Hugging Face Inference surface (same token, same free tier) but caption through the router's OpenAI-compatible `/v1/chat/completions` with a hosted vision-language model. Default: `google/gemma-3-4b-it` — probed as available on this account, small/fast, answers cleanly without reasoning preambles (Qwen-VL variants weren't enabled for the account; GLM-4.5V returned empty content under tight token budgets).
 **Why it validates the architecture:** the swap touched one provider file (~30 lines) and two env defaults; pipeline, worker, retries, tests, and UI were untouched. This is precisely the churn the provider seam (D-004) was designed to absorb. `HF_CAPTION_MODEL` / `HF_CAPTION_URL` stay env-swappable for the next time the provider landscape shifts.
 **Trade-offs:** a 4B instruct VLM captions differently than BLIP (usually better); free-tier router credits are finite (fine for review-scale traffic).
-
-## D-022 · SafeSearch results render only for a completed safety step ✅
-
-**Context:** Mongoose materializes empty nested paths as `{}` (truthy) — the UI initially rendered an all-UNKNOWN safety matrix for jobs whose safety step never ran. Caught during browser QA.
-**Decision:** Result sections in the detail view are gated on the *step's* status, not on data truthiness. Step status is the single source of truth for "did this produce results".
 
 ---
 

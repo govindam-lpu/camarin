@@ -31,7 +31,16 @@ export function createJobProcessor(deps: PipelineDeps) {
         'job attempt failed',
       );
 
-      if (isFinal) await markJobFailed(jobId, err);
+      if (isFinal) {
+        // Guarded: a bookkeeping failure must not mask the real error. If this write
+        // is lost, the QueueEvents reconciler is the backstop that keeps Mongo truthful.
+        await markJobFailed(jobId, err).catch((markErr) =>
+          logger.error(
+            { jobId, err: (markErr as Error).message },
+            'failed to record terminal job failure',
+          ),
+        );
+      }
       if (!retryable) throw new UnrecoverableError((err as Error).message);
       throw err;
     }

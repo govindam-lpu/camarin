@@ -47,11 +47,43 @@ function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise
 }
 
 /**
+ * Inline driver (dev harness only, D-021): runs the real worker pipeline in-process —
+ * same processor, same classification/finality semantics; only the transport
+ * (cross-process delivery, persistence, backoff pacing) is skipped.
+ */
+async function runInline(jobId: string): Promise<void> {
+  // Lazy imports so bullmq-mode API processes never load the pipeline stack.
+  const [{ createJobProcessor }, { getAiProvider }, { getStorage }, { UnrecoverableError }] =
+    await Promise.all([
+      import('../worker/processor'),
+      import('../providers/ai'),
+      import('../providers/storage'),
+      import('bullmq'),
+    ]);
+  const runAttempt = createJobProcessor({ provider: getAiProvider(), storage: getStorage() });
+
+  for (let attempt = 1; attempt <= env.JOB_ATTEMPTS; attempt += 1) {
+    try {
+      await runAttempt(jobId, env.JOB_ATTEMPTS);
+      return;
+    } catch (err) {
+      // Terminal outcomes are already recorded in Mongo by the processor.
+      if (err instanceof UnrecoverableError || attempt >= env.JOB_ATTEMPTS) return;
+      await new Promise((resolve) => setTimeout(resolve, 500 * attempt));
+    }
+  }
+}
+
+/**
  * Enqueue a processing job. Retry policy lives here, not in the worker:
  * transient failures re-attempt with exponential backoff (3s -> 6s -> 12s by default);
  * the worker escalates permanent errors via UnrecoverableError to skip remaining attempts. (D-009)
  */
 export async function enqueueProcessingJob(jobId: string): Promise<void> {
+  if (env.QUEUE_DRIVER === 'inline') {
+    setImmediate(() => void runInline(jobId));
+    return;
+  }
   await withTimeout(
     getQueue().add(
       'process-image',
@@ -77,6 +109,8 @@ export async function closeQueue(): Promise<void> {
 
 /** Health-check ping over the queue's existing Redis connection (bounded, never hangs). */
 export async function pingRedis(): Promise<boolean> {
+  // Inline driver: the queue IS this process — reporting its health is reporting ours.
+  if (env.QUEUE_DRIVER === 'inline') return true;
   try {
     const client = (await withTimeout(
       Promise.resolve(getQueue().client),

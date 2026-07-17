@@ -84,18 +84,29 @@ router.post('/', uploadLimiter, upload.single('file'), async (req, res) => {
 
   await getStorage().put(storageKey, file.buffer);
 
-  const job = await Job.create({
-    _id: jobId,
-    userId: req.user!._id,
-    status: 'pending',
-    file: {
-      originalName: decodeOriginalName(file.originalname),
-      mime: sniffed.mime,
-      size: file.size,
-      storageKey,
-    },
-    queuedAt: new Date(),
-  });
+  let job: JobDoc;
+  try {
+    job = await Job.create({
+      _id: jobId,
+      userId: req.user!._id,
+      status: 'pending',
+      file: {
+        originalName: decodeOriginalName(file.originalname),
+        mime: sniffed.mime,
+        size: file.size,
+        storageKey,
+      },
+      queuedAt: new Date(),
+    });
+  } catch (err) {
+    // No job document -> nothing points at the stored bytes. Best-effort cleanup
+    // instead of leaking an orphan into storage. (Enqueue failure below is different:
+    // the job exists and Retry recovers it, so the file must stay — D-018.)
+    await getStorage()
+      .delete(storageKey)
+      .catch(() => {});
+    throw err;
+  }
 
   try {
     await enqueueProcessingJob(job.id);

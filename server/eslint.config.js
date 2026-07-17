@@ -17,4 +17,9 @@ export default tseslint.config(
       'no-console': 'warn',
     },
   },
+  {
+    // CLI scripts talk to humans via stdout — that's their job.
+    files: ['scripts/**'],
+    rules: { 'no-console': 'off' },
+  },
 );
