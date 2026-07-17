@@ -3,7 +3,7 @@
  *
  * Extensions and Content-Type headers are attacker-controlled; the first bytes of the
  * file are not. A renamed `.txt -> .jpg` passes a MIME whitelist but fails here.
- * Deliberately zero-dependency (~20 lines) instead of pulling in `file-type`. (DECISIONS.md D-015)
+ * Deliberately zero-dependency (~20 lines) instead of pulling in `file-type`.
  */
 
 export const ALLOWED_MIME_TYPES = ['image/jpeg', 'image/png', 'image/webp'] as const;

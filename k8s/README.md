@@ -11,7 +11,7 @@ the canonical local runner; these exist to demonstrate the production shape:
   values intentionally absent).
 - **Mongo & Redis are not manifested**: in any real deployment those are managed services
   (Atlas / managed Redis). Running stateful databases inside the cluster is a deliberate
-  non-goal here — see DECISIONS.md.
+  non-goal here.
 
 ```bash
 kubectl apply -f k8s/namespace.yaml
@@ -27,4 +27,4 @@ kubectl apply -f k8s/
 ```
 
 Note: `STORAGE_DRIVER=s3` is required on k8s — pods share no disk (same reasoning as the
-PaaS deploy, DECISIONS.md D-003).
+single-VM deploy: the local-disk driver only works when API and worker share a filesystem).

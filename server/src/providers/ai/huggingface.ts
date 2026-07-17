@@ -4,7 +4,7 @@ import type { CaptionResult, ImageInput } from './types';
 export interface HfConfig {
   /** OpenAI-compatible chat completions endpoint on the HF router. */
   url: string;
-  /** A hosted vision-language model id (see DECISIONS.md D-023). */
+  /** A hosted vision-language model id (see README: Assumptions & decisions). */
   model: string;
   token: string;
   timeoutMs: number;

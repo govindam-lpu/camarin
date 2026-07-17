@@ -4,10 +4,10 @@
 
 Upload images → they're stored durably, queued, and processed **asynchronously** by a worker running a three-step AI pipeline (**caption → labels → safety check**) → enriched results stream into a live-updating UI. Users never wait on AI: uploads return a job ID immediately.
 
-- **Live demo:** _add your deployed URL here after running [deploy/README.md](deploy/README.md)_
+- **Live demo:** **https://34-131-77-35.nip.io** — sign up, upload an image, watch the real AI pipeline run
 - **Deploy guide:** [deploy/README.md](deploy/README.md) — one small VM runs the exact compose stack + Caddy for automatic HTTPS
-- **API docs:** `/api/docs` (Swagger UI) · [openapi.yaml](server/openapi.yaml)
-- **Decision log:** a full record of every non-obvious choice, its alternatives, and what was deliberately cut — provided as a separate document with the submission ⭐
+- **API collection:** [openapi.yaml](server/openapi.yaml) (live Swagger UI at `/api/docs`) · [Postman collection](postman_collection.json)
+- **Assumptions & decisions:** [documented below](#assumptions--decisions-where-the-spec-was-open-ended) — the open-ended choices and the reasoning behind each ⭐
 
 ---
 
@@ -48,17 +48,17 @@ Every requirement in the brief, and where it lives:
 
 | Requirement | Where / how |
 |---|---|
-| Sign up & log in; **all** endpoints authenticated; auth choice documented | JWT Bearer + bcrypt(12); `requireAuth` on every route (unauth → 401); rationale in the decision log |
+| Sign up & log in; **all** endpoints authenticated; auth choice documented | JWT Bearer + bcrypt(12); `requireAuth` on every route (unauth → 401); rationale in [Assumptions & decisions](#assumptions--decisions-where-the-spec-was-open-ended) |
 | Uploads restricted to JPG/PNG/WEBP, clear error otherwise | MIME whitelist **and** magic-byte content sniff → 400 (a renamed `.txt` is caught) |
 | Max 5 MB, enforced **at the API layer** | multer limit → 413 `FILE_TOO_LARGE` (not just a frontend check) |
 | Assign job ID, store file, create `pending` job, enqueue, return immediately | `POST /api/jobs` → **201 + job ID instantly**; processing never blocks the response |
 | UI: signup/login · upload · job list with statuses · detail with full results · **retry failed** | React SPA — all five, verified end-to-end |
-| Status updates via polling or WebSockets (documented) | Polling that **stops when idle**, choice documented (D-006) |
-| Flag when SafeSearch returns LIKELY/VERY_LIKELY; store the category | `computeFlaggedCategories` — POSSIBLE deliberately does **not** flag (D-012) |
-| Flagged jobs surfaced distinctly + user notified | Distinct row styling + "Flagged" filter + in-app notification center (D-007) |
+| Status updates via polling or WebSockets (documented) | Polling that **stops when idle**, choice documented below |
+| Flag when SafeSearch returns LIKELY/VERY_LIKELY; store the category | `computeFlaggedCategories` — POSSIBLE deliberately does **not** flag |
+| Flagged jobs surfaced distinctly + user notified | Distinct row styling + "Flagged" filter + in-app notification center |
 | MERN · queue · Docker (mandatory) · Kubernetes (bonus) | Mongo/Express/React/Node · BullMQ+Redis · Dockerfile + compose · [k8s/](k8s/) manifests |
 | `docker compose up` brings up API + worker + queue + database | Verified — 4 services, zero config → working system |
-| Deliverables: repo · deployed URL · API collection · README | This repo · [deploy guide](deploy/README.md) · OpenAPI at `/api/docs` · this file |
+| Deliverables: repo · deployed URL · API collection · README | This repo · [live](https://34-131-77-35.nip.io) + [deploy guide](deploy/README.md) · OpenAPI `/api/docs` + [Postman](postman_collection.json) · this file |
 | Tests on worker pipeline logic + retry behavior (minimum) | 53 tests; [pipeline.test.ts](server/tests/pipeline.test.ts) + [retry.test.ts](server/tests/retry.test.ts) |
 | Bonus: scalability under 10× articulated | [Scalability](#scalability-how-this-behaves-at-10-and-what-breaks-first) section |
 
@@ -94,19 +94,33 @@ stateDiagram-v2
     completed --> [*]
 ```
 
-### Why it's shaped this way (short version — full reasoning in the decision log, submitted separately)
+---
 
-| Concern | Choice | The one-line why |
+## Assumptions & decisions (where the spec was open-ended)
+
+**Assumptions I made:**
+
+- **Ownership** — every job belongs to exactly one user; users only ever see and act on their own jobs (enforced on every route). No org/sharing model.
+- **Job identity** — the Mongo `ObjectId` is the public job ID, used end-to-end (DB, queue, API, UI) — no separate UUID layer.
+- **"Flagged" is read literally** — a job is flagged only when SafeSearch returns `LIKELY` or `VERY_LIKELY` for a category; `POSSIBLE` does **not** flag (every likelihood is still stored and shown).
+- **AI accuracy is not the goal** — per the brief, the pipeline *engineering* is what's assessed. A deterministic `mock` provider backs local review and the tests; `real` wires the actual APIs.
+- **Whole-file processing** — the 5 MB cap keeps in-memory buffers small and bounded, so there's no streaming machinery.
+- **Single-VM prod uses local-disk storage** — the API and worker share one volume, so no object store is needed at this scale; `s3` is the drop-in for multi-node.
+
+**Decisions where the spec said "your choice" / left it open:**
+
+| Open-ended point | Choice | Why (short) |
 |---|---|---|
-| Queue | BullMQ on Redis | Retries/backoff/concurrency/stalled-recovery built in; zero custom retry plumbing (D-001) |
-| API ↔ worker split | One package, two entrypoints, one Docker image | They share models/providers/config; separate packages would add tooling for zero gain at this size (D-010) |
-| Auth | Stateless JWT + bcrypt | Horizontally scalable, no session store, Postman-friendly (D-002) |
-| File storage | Adapter: `local` disk (compose) / any S3-compatible (prod) | Reviewers need zero cloud creds; PaaS containers share no disk (D-003) |
-| AI calls | Provider interface, `mock` + `real` | Zero-key local review, deterministic tests, 20-line model swaps when providers shift (D-004) |
-| Status updates | Polling that **stops when idle** | 5–15s jobs don't justify a third stateful system (WebSockets); stateless scales (D-006) |
-| Flagged notify | In-app notification center | Demoable in compose with zero third-party creds; email is an adapter away (D-007) |
-| Retries | Classified errors: transient → backoff retries; permanent → fail fast | HF cold starts make transient failure the *normal* case (D-009) |
-| Pipeline state | Per-step checkpoints in Mongo | Retries resume from the failed step — never re-pay for completed AI calls (D-008) |
+| **Queue** | BullMQ on Redis | Retries, exponential backoff, concurrency, and stalled-job recovery are built in — zero custom retry plumbing. RabbitMQ/Kafka would be more ops for no gain here. |
+| **Auth** | Stateless JWT (Bearer) + bcrypt(12) | Horizontally scalable, no session store, trivial from the SPA / Postman / curl. Documented trade-off: no server-side revocation (bounded by a 24 h expiry). |
+| **File storage** | Adapter: `local` disk / any S3-compatible | Reviewers need zero cloud creds locally; prod containers share no disk. One interface — `local` for compose, `s3` (GCS/R2/B2/MinIO) for scale-out. |
+| **Status updates** | Polling that **stops when idle** | Jobs take 5–15 s; sub-second latency isn't worth a third stateful system. Polling is stateless and proxy-friendly; SSE/WebSockets is the documented upgrade path. |
+| **Flagged notification** | In-app notification center | Self-contained and demoable in compose with no third-party creds; email is a future channel behind the same write. |
+| **AI models** | `mock` + `real`; caption via a hosted vision model on the HF router | The brief says the model isn't the point. HF retired the task-specific BLIP endpoint, so captioning goes through the router's chat API with `google/gemma-3-4b-it` — a ~30-line swap behind the provider seam, which is exactly why that seam exists. |
+| **CI/CD** | GitHub Actions — lint + typecheck + tests + Docker build on every push | Zero-secret CI; the same image it builds is what deploys. |
+| **Cloud platform** | Single VM running the exact `docker compose` stack + Caddy for TLS | "What you review locally is what runs in prod" — the deployment adds only HTTPS termination. |
+| **API ↔ worker split** | One package, two entrypoints, one image | They share models/providers/config; separate packages would add tooling for no gain at this size. |
+| **Pipeline shape** | Three sequential steps, each checkpointed to Mongo | Matches the brief's framing; checkpoints let a retry resume from the failed step instead of re-paying for completed AI calls. |
 
 ---
 
@@ -162,7 +176,7 @@ Everything is validated at boot (zod) — invalid/missing config **fails fast wi
 | `S3_ENDPOINT/BUCKET/ACCESS_KEY_ID/SECRET_ACCESS_KEY` | — | required iff `STORAGE_DRIVER=s3` |
 | `AI_PROVIDER` | `mock` | `real` requires the two keys below |
 | `HF_TOKEN` | — | Hugging Face read token |
-| `HF_CAPTION_URL` / `HF_CAPTION_MODEL` | HF router chat API / `google/gemma-3-4b-it` | swap caption models without code changes (see D-023 for why not BLIP) |
+| `HF_CAPTION_URL` / `HF_CAPTION_MODEL` | HF router chat API / `google/gemma-3-4b-it` | swap caption models without code changes (HF retired the task-specific BLIP endpoint — see Assumptions & decisions) |
 | `GCV_API_KEY` | — | Google Cloud Vision API key |
 | `WORKER_CONCURRENCY` | `4` | parallel jobs per worker process |
 | `JOB_ATTEMPTS` / `JOB_BACKOFF_MS` | `3` / `3000` | retry budget & exponential backoff base |
@@ -211,7 +225,7 @@ Real Mongo semantics via `mongodb-memory-server`; queue and AI providers are inj
 
 ```
 ├─ docker-compose.yml     # api + worker + redis + mongo, zero-config
-├─ server/                # one package, two entrypoints (D-010)
+├─ server/                # one package, two entrypoints (api + worker)
 │  ├─ openapi.yaml        # served at /api/docs
 │  ├─ Dockerfile          # multi-stage; SPA baked into the API image
 │  └─ src/
@@ -234,7 +248,7 @@ Real Mongo semantics via `mongodb-memory-server`; queue and AI providers are inj
 2. **Workers scale linearly until then** — stateless consumers: `--scale worker=N` in compose, replicas in k8s (queue-depth HPA via KEDA is the natural trigger; manifests in [k8s/](k8s/)).
 3. **API scales horizontally already** — stateless JWT, no sessions, no sticky requirements. N replicas behind any LB.
 4. **Polling load** grows with concurrent active users (~0.4 req/s each while jobs run, zero when idle). At 10× it's fine (the list query is one indexed read); at 100× swap to SSE/socket.io fanned out via Redis pub/sub — the worker already centralizes every state transition, so the emit point exists.
-5. **Image serving through the API** becomes the bandwidth hog: switch the storage adapter to presigned GET URLs + CDN (the seam exists; D-013).
+5. **Image serving through the API** becomes the bandwidth hog: switch the storage adapter to presigned GET URLs + CDN (the seam already exists).
 6. **Redis** is the single queue broker: managed Redis with persistence/replica (queue survives broker restarts thanks to AOF locally, RDB+replica in prod).
 7. **Mongo**: job docs are small and write patterns are per-step updates on one doc — indexes already cover the hot paths `(userId, createdAt)`, `(status)`, `(flagged)`. Shard-by-userId is the eventual story, far past 10×.
 
@@ -242,7 +256,7 @@ Real Mongo semantics via `mongodb-memory-server`; queue and AI providers are inj
 
 ## Known limitations & what I'd do with more time
 
-Deliberate cuts, each with full reasoning in the decision log (submitted separately):
+Deliberate cuts, and why:
 
 - **No email notifications** — in-app only; the notification write is behind one seam, Resend would slot in.
 - **No WebSockets/SSE** — polling is the right cost/benefit at 5–15s job durations.
