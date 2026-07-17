@@ -122,6 +122,36 @@ stateDiagram-v2
 | **API ↔ worker split** | One package, two entrypoints, one image | They share models/providers/config; separate packages would add tooling for no gain at this size. |
 | **Pipeline shape** | Three sequential steps, each checkpointed to Mongo | Matches the brief's framing; checkpoints let a retry resume from the failed step instead of re-paying for completed AI calls. |
 
+### Decision-code legend
+
+The `(D-xxx)` markers throughout the source and infra files resolve here — one line each. The full log (alternatives weighed, trade-offs, and when I'd revisit each) is in `DECISIONS.md`, submitted alongside.
+
+| Code | Decision |
+|---|---|
+| D-001 | **Queue: BullMQ on Redis** — retries, exponential backoff, concurrency, and stalled-job recovery are built in |
+| D-002 | **Auth: stateless JWT (Bearer) + bcryptjs(12)** — horizontally scalable, no session store; user re-loaded per request |
+| D-003 | **Storage adapter** — `local` disk (compose) and `s3` (GCS/R2/B2/MinIO) behind one interface |
+| D-004 | **AI providers behind an interface + first-class `mock` mode** — `docker compose up` works with zero API keys |
+| D-005 | **Mock demo hooks via magic filenames** — `flagme`/`flaky`/`failme`/`badreq` exercise every path in seconds |
+| D-006 | **Status updates: polling that stops when idle** — stateless and proxy-friendly; SSE/WebSockets is the upgrade path |
+| D-007 | **Flagged notification: in-app center**, not email — self-contained, demoable with no third-party creds |
+| D-008 | **Pipeline: three sequential steps, each checkpointed to Mongo** — a retry resumes from the failed step |
+| D-009 | **Failure model: typed `retryable` errors + bounded retries** — permanent errors fail fast; finality is deterministic and unit-tested |
+| D-010 | **Repo shape: one server package, two entrypoints** (api/worker), one image |
+| D-011 | **TypeScript run via `tsx`** — `tsc --noEmit` typecheck gate, Vitest, ESLint + Prettier |
+| D-012 | **Flagged rule: only LIKELY / VERY_LIKELY flag** — `POSSIBLE` does not |
+| D-013 | **Image serving: authenticated API byte stream** → blob URL in the SPA (an `<img src>` can't carry auth) |
+| D-014 | **Files as Buffers, not streams** — bounded by the 5 MB cap |
+| D-015 | **Upload validation: size + MIME whitelist + magic-byte sniff** at the API layer (a renamed file is caught) |
+| D-016 | **bcryptjs over native bcrypt** — no node-gyp build in Alpine images |
+| D-017 | **HTTP client: native `fetch`**, no axios |
+| D-018 | **Enqueue failure at upload → job `failed (QUEUE_ENQUEUE_FAILED)`**, not HTTP 500 — file is durable, Retry recovers |
+| D-019 | **Job identity: the Mongo ObjectId is the public job ID** — one ID end-to-end |
+| D-020 | **Bounded queue operations** — timeouts so a Redis outage fails fast instead of hanging requests |
+| D-021 | **Zero-infra dev harness** — in-memory Mongo + inline queue driver (`scripts/dev-standalone.ts`) |
+| D-022 | **SafeSearch renders only for a completed safety step** — step status is the source of truth, not data truthiness |
+| D-023 | **Caption model: hosted VLM via the HF router**, not BLIP — HF retired task-specific image-to-text serving |
+
 ---
 
 ## Failure handling (the part worth reading)
