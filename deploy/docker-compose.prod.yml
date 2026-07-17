@@ -1,0 +1,28 @@
+# Production overlay for the single-VM deployment.
+#
+#   docker compose -f docker-compose.yml -f deploy/docker-compose.prod.yml up -d --build
+#
+# Adds a Caddy reverse proxy in front of the API for automatic HTTPS (Let's Encrypt).
+# Everything else is inherited unchanged from the base compose — the deployed stack is
+# byte-for-byte the one a reviewer runs locally, which is the whole point (D-014).
+services:
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports:
+      - '80:80'
+      - '443:443'
+    environment:
+      # Set by deploy/setup.sh to <dashed-ip>.nip.io so Caddy can get a real cert.
+      # Falls back to :80 (plain HTTP) if unset.
+      SITE_ADDRESS: ${SITE_ADDRESS:-:80}
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on:
+      - api
+
+volumes:
+  caddy-data:
+  caddy-config:

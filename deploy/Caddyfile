@@ -1,0 +1,11 @@
+# Caddy fronts the API. If SITE_ADDRESS is a hostname (e.g. 34-1-2-3.nip.io),
+# Caddy provisions a Let's Encrypt cert automatically. If it's ":80", it serves plain HTTP.
+# (Caddy env-var default syntax is {$VAR:default}; setup.sh always sets SITE_ADDRESS anyway.)
+{$SITE_ADDRESS::80} {
+	encode gzip
+	# Uploads are capped at 5MB by the app; give the proxy generous headroom.
+	request_body {
+		max_size 10MB
+	}
+	reverse_proxy api:8080
+}

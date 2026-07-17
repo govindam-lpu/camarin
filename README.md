@@ -2,7 +2,8 @@
 
 Upload images → they're stored durably, queued, and processed **asynchronously** by a worker running a three-step AI pipeline (**caption → labels → safety check**) → enriched results stream into a live-updating UI. Users never wait on AI: uploads return a job ID immediately.
 
-- **Live demo:** _deployment URL goes here (Phase 8)_
+- **Live demo:** _add your deployed URL here after running [deploy/README.md](deploy/README.md)_
+- **Deploy guide:** [deploy/README.md](deploy/README.md) — one small VM runs the exact compose stack + Caddy for automatic HTTPS
 - **API docs:** `/api/docs` (Swagger UI) · [openapi.yaml](server/openapi.yaml)
 - **Decision log:** a full record of every non-obvious choice, its alternatives, and what was deliberately cut — provided as a separate document with the submission ⭐
 
