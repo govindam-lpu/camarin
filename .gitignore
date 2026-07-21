@@ -23,6 +23,9 @@ Thumbs.db
 # decision log — maintained locally, submitted separately (kept off the public repo)
 DECISIONS.md
 
+# private interview prep notes
+INTERVIEW-PREP.md
+
 # the interview spec PDF stays out of the public repo
 Interview Task*
 *.pdf
